@@ -12,12 +12,12 @@ import com.smallaswater.easysql.mysql.manager.SqlManager;
 public class LoginPool {
 
     public DruidDataSource dataSource = new DruidDataSource();
+
     private final String user;
-
     private final String ip;
-
     private final String database;
 
+    @Deprecated
     private SqlManager manager;
 
     public LoginPool(String ip, String user, String database) {
@@ -26,10 +26,12 @@ public class LoginPool {
         this.database = database;
     }
 
+    @Deprecated
     public void setManager(SqlManager manager) {
         this.manager = manager;
     }
 
+    @Deprecated
     public SqlManager getManager() {
         return manager;
     }
