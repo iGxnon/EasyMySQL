@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
  *
  * @author SmallasWater
  */
+@Deprecated
 public class SqlDataManager {
 
 

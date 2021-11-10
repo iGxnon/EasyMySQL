@@ -14,6 +14,7 @@ import java.sql.SQLException;
  *
  * @author 若水
  */
+@Deprecated
 public abstract class AbstractOperation {
 
     protected String database;

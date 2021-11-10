@@ -18,6 +18,7 @@ import java.sql.SQLException;
  *
  * @author 楠木i，若水
  */
+@Deprecated
 public abstract class BaseMySql extends AbstractOperation {
 
     private final UserData data;
