@@ -22,7 +22,7 @@ public class ExampleEntity {
     public Long registerIndex;
 
     @AutoUUIDGenerate
-    @Column(identifier = "register_index", type = ColumnTypes.BIGINT, options = {})
+    @Column(identifier = "second_uuid", type = ColumnTypes.BIGINT, options = {})
     public Long secondUUID;
 
     @Column(identifier = "name",
