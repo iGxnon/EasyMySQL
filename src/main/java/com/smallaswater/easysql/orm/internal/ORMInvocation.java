@@ -9,8 +9,13 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) {
-
-        return null;
+        if (method.getName().equals("toString")) {
+            return this.toString();
+        }
+        System.out.println("begin");
+        Object ret = null;
+        System.out.println("end");
+        return ret;
     }
 
 
