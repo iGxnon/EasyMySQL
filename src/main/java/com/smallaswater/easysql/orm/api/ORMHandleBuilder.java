@@ -5,6 +5,7 @@ import com.smallaswater.easysql.EasySql;
 import com.smallaswater.easysql.exceptions.MySqlLoginException;
 import com.smallaswater.easysql.mysql.utils.LoginPool;
 import com.smallaswater.easysql.mysql.utils.UserData;
+import com.smallaswater.easysql.orm.api.example.ExampleDAO;
 import com.smallaswater.easysql.orm.handle.ORMDynaProxyHandle;
 import com.smallaswater.easysql.orm.handle.ORMStdHandle;
 import com.smallaswater.easysql.v3.mysql.manager.SqlManager;
@@ -34,13 +35,13 @@ public class ORMHandleBuilder {
 
     private LoginPool pool;
 
-    private static ORMHandleBuilder builder(Plugin plugin) {
+    public static ORMHandleBuilder builder(Plugin plugin) {
         ORMHandleBuilder builder = new ORMHandleBuilder();
         builder.setPlugin(plugin);
         return builder;
     }
 
-    private static ORMHandleBuilder builder(Plugin plugin, String table) {
+    public static ORMHandleBuilder builder(Plugin plugin, String table) {
         ORMHandleBuilder builder = new ORMHandleBuilder();
         builder.setPlugin(plugin);
         builder.setTable(table);
@@ -81,11 +82,11 @@ public class ORMHandleBuilder {
         return new ORMStdHandle();
     }
 
-    public <T> IDAO<T> buildORMDynaProxyIDAO(Class<IDAO<T>> clazz) {
-        return new ORMDynaProxyHandle<>(clazz, this.table, this.manager).getProxyInstance();
+    public <T> IDAO<T> buildORMDynaProxyIDAO(Class<? extends IDAO<T>> dao) {
+        return new ORMDynaProxyHandle<>(dao, this.table, this.manager).getProxyInstance();
     }
 
-    public <T> IDAO<T> buildORMDynaProxyIDAO(String tableName, Class<IDAO<T>> clazz) {
+    public <T> IDAO<T> buildORMDynaProxyIDAO(String tableName, Class<? extends IDAO<T>> clazz) {
         return new ORMDynaProxyHandle<>(clazz, tableName, this.manager).getProxyInstance();
     }
 

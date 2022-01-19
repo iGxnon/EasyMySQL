@@ -1,6 +1,5 @@
 package com.smallaswater.easysql.orm.annotations.entity;
 
-import com.smallaswater.easysql.mysql.utils.Types;
 import com.smallaswater.easysql.orm.utils.ColumnOptions;
 import com.smallaswater.easysql.orm.utils.ColumnTypes;
 
@@ -17,7 +16,6 @@ public @interface Column {
 
     ColumnTypes type();
 
-    ColumnOptions[] options();
-
+    ColumnOptions[] options() default {};
 
 }
