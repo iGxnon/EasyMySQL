@@ -271,7 +271,7 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
                     try {
                         Object value = it.get(entity);
                         if (it.isAnnotationPresent(AutoUUIDGenerate.class)) {
-                            value = UUID.randomUUID().toString();
+                            value = UUID.randomUUID().toString();  // 自动生成 uuid
                         }
                         if (!option.contains("auto_increment") && value != null) { // 跳过自增键和空值
                             data.put(column.name(), value);

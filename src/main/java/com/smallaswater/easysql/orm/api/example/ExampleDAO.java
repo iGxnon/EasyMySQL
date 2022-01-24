@@ -31,8 +31,8 @@ public interface ExampleDAO extends IDAO<ExampleEntity> {
      */
     @DoDefault
     default void doSomething() {
-        System.out.println(getManager()); // you got sqlManager
-        System.out.println(getTable()); // you got tableName
+        getManager(); // you got sqlManager
+        getTable(); // you got tableName
         // and do something you like!
     }
 
