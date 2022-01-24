@@ -1,35 +1,36 @@
 package com.smallaswater.easysql.orm.api.example;
 
+import com.smallaswater.easysql.mysql.utils.Types;
 import com.smallaswater.easysql.orm.annotations.entity.*;
-import com.smallaswater.easysql.orm.utils.ColumnOptions;
-import com.smallaswater.easysql.orm.utils.ColumnTypes;
-import com.smallaswater.easysql.orm.utils.UniqueKeyTypes;
+import com.smallaswater.easysql.orm.utils.Options;
 
 public class ExampleEntity {
 
-    @PrimaryKey(type = UniqueKeyTypes.BIGINT)
-    @AutoIncrement // 可以省略
-    @Column(identifier = "id", type = ColumnTypes.BIGINT)
+    @Column(name = "id", type = Types.ID) // ID 类型的 column 会自增
     public Long id;
 
-    @UniqueKey(type = UniqueKeyTypes.UUID) // 和 @AutoUUIDGenerate 效果一样
-    @AutoUUIDGenerate // 可以省略
-    @Column(identifier = "uuid", type = ColumnTypes.VARCHAR)
+    @AutoUUIDGenerate // 自动生成 uuid
+    @Column(name = "uuid", type = Types.VARCHAR)
     public String uuid;
 
-    @AutoIncrement
-    @Column(identifier = "register_index", type = ColumnTypes.BIGINT)
-    public Long registerIndex;
+    @Column(name = "index", type = Types.INT)
+    public Long index;
 
     @AutoUUIDGenerate
-    @Column(identifier = "second_uuid", type = ColumnTypes.BIGINT)
-    public Long secondUUID;
+    @Column(name = "second_uuid", type = Types.VARCHAR, options = {Options.NULL})  // 可以是 null
+    public String secondUUID;
 
-    @Column(identifier = "name",
-            type = ColumnTypes.VARCHAR,
-            options = {ColumnOptions.NOTNULL})
+    @Column(name = "name", type = Types.VARCHAR)
     public String name;
 
-
-
+    @Override
+    public String toString() {
+        return "ExampleEntity{" +
+                "id=" + id +
+                ", uuid='" + uuid + '\'' +
+                ", index=" + index +
+                ", secondUUID='" + secondUUID + '\'' +
+                ", name='" + name + '\'' +
+                '}';
+    }
 }

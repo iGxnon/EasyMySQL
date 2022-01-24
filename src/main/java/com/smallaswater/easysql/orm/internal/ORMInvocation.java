@@ -1,33 +1,34 @@
 package com.smallaswater.easysql.orm.internal;
 
-
+import cn.nukkit.plugin.PluginClassLoader;
+import com.smallaswater.easysql.mysql.data.SqlData;
+import com.smallaswater.easysql.mysql.data.SqlDataList;
+import com.smallaswater.easysql.mysql.utils.ChunkSqlType;
 import com.smallaswater.easysql.orm.annotations.dao.DoDefault;
 import com.smallaswater.easysql.orm.annotations.dao.DoExecute;
 import com.smallaswater.easysql.orm.annotations.dao.DoInsert;
 import com.smallaswater.easysql.orm.annotations.dao.DoQuery;
 import com.smallaswater.easysql.orm.annotations.entity.*;
 import com.smallaswater.easysql.orm.api.IDAO;
-import com.smallaswater.easysql.orm.utils.ColumnOptions;
-import com.smallaswater.easysql.orm.utils.ColumnTypes;
 import com.smallaswater.easysql.v3.mysql.manager.SqlManager;
+import javassist.*;
 
 import java.lang.reflect.*;
-import java.sql.*;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
 
     private final SqlManager manager;
     private final String table;
-    private final Class<T> clazz;
+    private final Class<T> clazz; // 被代理的接口 class
     private final Class<?> entityClass;
 
     private final Class<?> defaultDoClass;
 
-    public Object defaultDoProxyObj;
+    private Object defaultDoProxyObj;
+
+    // 储存 name -> Field 的 map
+    private final Map<String, Field> columnFields = new HashMap<>();
 
     public ORMInvocation(Class<T> clazz, String table, SqlManager manager) {
         this.manager = manager;
@@ -36,14 +37,93 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
         this.entityClass = ((Class<?>) ((ParameterizedType) Arrays.stream(clazz.getGenericInterfaces())
                 .filter(t -> t.getTypeName().replaceAll("<\\S+>", "").endsWith("IDAO"))
                 .findFirst().get()).getActualTypeArguments()[0]);
-        this.defaultDoClass = Arrays.stream(clazz.getDeclaredClasses()).filter( t -> t.getName().endsWith("Default")).findFirst().get();
+        this.defaultDoClass = generateDoDefaultClass();
         try {
+
             this.defaultDoProxyObj = this.defaultDoClass.newInstance();
+
+            // 依赖注入
+            Field m = this.defaultDoClass.getDeclaredField("manager");
+            m.setAccessible(true);
+
+            // this.manager 是 PluginClassLoader 加载的SqlManager类生成的对象
+            // defaultDoProxyObj 是由 javassist 的类加载器加载的类生成的对象，其中的 manager 字段的类型的SqlManager类是由这个类加载器加载的(javassist中的类加载器打破了父类委托机制，即使把 PluginClassLoader 设置成 javassist 的父加载器, 它也不会让 PluginClassLoader 去加载)
+            // 然后就不能把 this.manager 写入到 defaultDoProxyObj的 manager 字段里，因为它们的类不是同一个类加载器加载的，类型不同，蕨了，艹
+            // 解决方式：自己写了一个 ASMClassloader，给 javassist 的类加载器重建父类委托机制
+            m.set(this.defaultDoProxyObj, this.manager);
+
+            Field t = this.defaultDoClass.getDeclaredField("table");
+            t.setAccessible(true);
+            t.set(this.defaultDoProxyObj, this.table);
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+        Arrays.stream(entityClass.getDeclaredFields())
+                .filter( t -> t.isAnnotationPresent(Column.class))
+                .forEach( t -> {
+                    Column c = t.getAnnotation(Column.class);
+                    columnFields.put(c.name(), t);
+                });
     }
 
+    // 使用 javassist 生成执行 Default 的类(继承代理的接口类)
+    @SuppressWarnings("unchecked")
+    private Class<?> generateDoDefaultClass() {
+        ClassPool classPool = ClassPool.getDefault();
+
+        classPool.insertClassPath(new ClassClassPath(this.getClass()));
+
+        String cn = this.clazz.getName() + "ImplClass";
+        CtClass clazz = classPool.makeClass(cn);
+        CtClass interf  = null;
+
+        //Loader loader = new Loader(this.getClass().getClassLoader(), classPool); 爬
+        // 使用自己的类加载器，重建父类委托机制
+        ASMClassLoader loader = new ASMClassLoader((PluginClassLoader) this.getClass().getClassLoader(), classPool);
+
+        try {
+            interf = classPool.getCtClass(this.clazz.getName());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        clazz.setInterfaces(new CtClass[]{interf});
+
+        try {
+            clazz.addField(CtField.make("public com.smallaswater.easysql.v3.mysql.manager.SqlManager manager;", clazz));
+            clazz.addField(CtField.make("public java.lang.String table;", clazz));
+
+            // 构造被拦截的方法，模拟拦截
+            clazz.addMethod(CtMethod.make("public com.smallaswater.easysql.v3.mysql.manager.SqlManager getManager(){return manager;}", clazz));
+            clazz.addMethod(CtMethod.make("public java.lang.String getTable(){return table;}", clazz));
+            clazz.addMethod(CtMethod.make("public java.lang.String toString(){return \"Table: \" + table + \" Manager: \" + manager;}", clazz));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+
+        Class<?> ret = null;
+        try {
+
+            // 强行把生成的类塞到 PluginClassLoader 里
+            Field classesField = PluginClassLoader.class.getDeclaredField("classes");
+            classesField.setAccessible(true);
+            HashMap<String, Class<?>> classes = ((HashMap<String, Class<?>>) classesField.get(this.getClass().getClassLoader()));
+            classes.put(cn, loader.loadClass(cn));
+            classesField.set(this.getClass().getClassLoader(), classes);
+
+            ret = this.getClass().getClassLoader().loadClass(cn);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return ret;
+    }
+
+    private Field findField(String identifier) {
+        return this.columnFields.get(identifier);
+    }
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) {
@@ -59,12 +139,8 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
         if (method.isAnnotationPresent(DoDefault.class)) {
             Object ret = null;
             try {
-                Method proxyM = Arrays.stream(this.defaultDoClass.getMethods())
-                        .filter(t -> t.getName().equals(method.getName())
-                                && t.getGenericReturnType().getTypeName().equals(method.getGenericReturnType().getTypeName()))
-                        .findFirst().get();
-                proxyM.setAccessible(true);
-                ret = proxyM.invoke(this.defaultDoProxyObj, args);
+                method.setAccessible(true);
+                ret = method.invoke(this.defaultDoProxyObj, args);
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -90,187 +166,63 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
             handleExecute(method.getAnnotation(DoExecute.class).value(), args);
             return null; // Execute 不支持返回
         }else if (method.isAnnotationPresent(DoQuery.class)) {
-            return handleQuery(method.getAnnotation(DoExecute.class).value(), args);
+            return handleQuery(method.getAnnotation(DoQuery.class).value(), args);
         }
         return null;
     }
 
 
     private List<Object> handleQuery(String sql, Object[] args) {
-        List<Object> result = new ArrayList<>();
-        Pattern p = Pattern.compile("\\{\\d}");
-        Matcher matcher = p.matcher(sql);
-        int i = 0;
-        List<String> params = new ArrayList<>();
-        while (matcher.find()) {
-            int index = Integer.parseInt(sql.substring(matcher.start() + 1, matcher.end() - 1));
-            params.add(index, args[i].toString());
-            sql = matcher.replaceFirst("?");
-            matcher = p.matcher(sql);
+        sql = sql.replace("{table}", this.table);
+        if (args != null && !checkParams(sql, Objects.requireNonNull(args).length)) {
+            throw new RuntimeException("SQL语法错误，入参数量不匹配");
+        }
+        ArrayList<ChunkSqlType> chunks = new ArrayList<>();
+        int i = 1;
+        String s = sql;
+        while (s.contains("?")) {
+            s = s.replace("?", "");
+            ChunkSqlType chunk = new ChunkSqlType(i, args[i - 1].toString());
+            chunks.add(chunk);
             i ++;
         }
-        sql = sql.replace("{table}", this.table);
 
-        Connection connection = this.manager.getConnection();
-        PreparedStatement stmt = null;
-        try {
-            stmt = connection.prepareStatement(sql);
-            for (int j = 0; j < params.size(); j++) {
-                stmt.setString(j, params.get(j));
-            }
-            ResultSet ret = stmt.executeQuery();
-            if (ret != null) {
-                ResultSetMetaData data;
-                while (ret.next()) {
-                    data = ret.getMetaData();
-                    Object entity = entityClass.newInstance();
+        List<Object> ret = new ArrayList<>();
+        SqlDataList<SqlData> queryData = this.manager.getData(sql, chunks.toArray(new ChunkSqlType[0]));
+        for (SqlData data : queryData) {
+            try {
+                Object obj = this.entityClass.newInstance();
 
-                    for (i = 0; i < data.getColumnCount(); i++) {
-                        String identifier = data.getColumnName(i + 1).toLowerCase(Locale.ROOT);
-                        Object obj = ret.getObject(i + 1);
-
-                        //  根据 identifier 从entityClass找到字段并把 obj cast 成该字段类型 然后写入 entity
-                        Field field = this.findField(identifier);
-
-                        Object to = field.getType().cast(obj);
-                        field.set(entity, to);
+                for (Map.Entry<String, Object> entry : data.getData().entrySet()) {
+                    String columnName = entry.getKey();
+                    Object value = entry.getValue();
+                    Field columnFiled = findField(columnName);
+                    if (columnFiled != null) {
+                        columnFiled.set(obj, value);
                     }
-                    result.add(entity);
                 }
-                ret.close();
-            }
-            stmt.close();
-        } catch (SQLException | InstantiationException | IllegalAccessException e) {
-            e.printStackTrace();
-        } finally { // 及时释放资源
-            if (stmt != null) {
-                try {
-                    stmt.close();
-                } catch (SQLException e) {
-                    e.printStackTrace();
-                }
-            }
-            if (connection != null) {
-                try {
-                    connection.close();
-                } catch (SQLException e) {
-                    e.printStackTrace();
-                }
+
+                ret.add(obj);
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
-        return result;
+        return ret;
     }
 
-    // TODO 将 identifier -> Field 注册进 Map
-    private Field findField(String identifier) {
-        AtomicReference<Field> find = new AtomicReference<>();
-        Arrays.stream(entityClass.getDeclaredFields())
-                .filter( t -> t.getAnnotations().length != 0) // 需要注解数不等于 0 的字段
-                .filter( t -> t.isAnnotationPresent(Column.class)) // 得要有 Column 注解
-                .forEach( t -> {
-                    Column a = t.getAnnotation(Column.class);
-                    if (identifier.equals(a.identifier())) {
-                        find.set(t);
-                    }
-                });
-        return find.get();
-    }
+
 
     private void handleInsert(Object[] args) {
-        Object paramEntity = entityClass.cast(args[0]);
 
-        Arrays.stream(entityClass.getDeclaredFields())
-                .filter( t -> t.getAnnotations().length != 0) // 需要注解数不等于 0 的字段
-                .filter( t -> t.isAnnotationPresent(Column.class)) // 得要有 Column 注解
-                .forEach( t -> {
-                    try {
-                        Object value = t.get(paramEntity); // 这个字段的值
-                        if (t.isAnnotationPresent(PrimaryKey.class)) {
-                            PrimaryKey annotation = t.getAnnotation(PrimaryKey.class);
-                            switch (annotation.type()) {
-                                case UUID:
-                                    value = UUID.randomUUID().toString(); // 自动生成 uuid
-                                    break;
-                                case BIGINT:
-                                    value = null; // 留给 mysql 自己补充
-                                    break;
-                            }
-                        }else if (t.isAnnotationPresent(UniqueKey.class)) {
-                            UniqueKey annotation = t.getAnnotation(UniqueKey.class);
-                            switch (annotation.type()) {
-                                case UUID:
-                                    value = UUID.randomUUID().toString(); // 自动生成 uuid
-                                    break;
-                                case BIGINT:
-                                    value = null; // 留给 mysql 自己补充
-                                    break;
-                            }
-                        }
-
-                        if (t.isAnnotationPresent(AutoUUIDGenerate.class)) {
-                            value = UUID.randomUUID().toString(); // 自动生成 uuid
-                        }else if (t.isAnnotationPresent(AutoIncrement.class)) {
-                            value = null; // 留给 mysql 自己补充
-                        }
-
-                        Column c = t.getAnnotation(Column.class);
-                        String identifier = c.identifier();
-                        ColumnTypes type = c.type();
-                        ColumnOptions[] options = c.options();
-
-                        // TODO
-
-                    } catch (IllegalAccessException e) {
-                        e.printStackTrace();
-                    }
-                });
-        if (this.manager.isExistTable(this.table)) {
-            // TODO 创建表
-        }
-        // TODO 插入值
     }
 
     private void handleExecute(String sql, Object[] args) {
-        Pattern p = Pattern.compile("\\{\\d}");
-        Matcher matcher = p.matcher(sql);
-        int i = 0;
-        List<String> params = new ArrayList<>();
-        while (matcher.find()) {
-            int index = Integer.parseInt(sql.substring(matcher.start() + 1, matcher.end() - 1));
-            params.add(index, args[i].toString());
-            sql = matcher.replaceFirst("?");
-            matcher = p.matcher(sql);
-            i ++;
-        }
-        sql = sql.replace("{table}", this.table);
 
-        Connection connection = this.manager.getConnection();
-        PreparedStatement stmt = null;
-        try {
-            stmt = connection.prepareStatement(sql);
-            for (int j = 0; j < params.size(); j++) {
-                stmt.setString(j, params.get(j));
-            }
-            stmt.execute();
-            stmt.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        } finally { // 及时释放资源
-            if (stmt != null) {
-                try {
-                    stmt.close();
-                } catch (SQLException e) {
-                    e.printStackTrace();
-                }
-            }
-            if (connection != null) {
-                try {
-                    connection.close();
-                } catch (SQLException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
+    }
+
+
+    private boolean checkParams(String sql, int cnt) {
+         return cnt == sql.split("\\?").length - 1;
     }
 
 }
