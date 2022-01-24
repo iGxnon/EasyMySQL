@@ -1,6 +1,5 @@
 package com.smallaswater.easysql.orm.internal;
 
-import cn.nukkit.plugin.PluginClassLoader;
 import com.smallaswater.easysql.mysql.data.SqlData;
 import com.smallaswater.easysql.mysql.data.SqlDataList;
 import com.smallaswater.easysql.mysql.utils.ChunkSqlType;
@@ -22,8 +21,6 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
     private final Class<T> clazz; // 被代理的接口 class
     private final Class<?> entityClass;
 
-    private final Class<?> defaultDoClass;
-
     private Object defaultDoProxyObj;
 
     // 储存 name -> Field 的 map
@@ -36,22 +33,18 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
         this.entityClass = ((Class<?>) ((ParameterizedType) Arrays.stream(clazz.getGenericInterfaces())
                 .filter(t -> t.getTypeName().replaceAll("<\\S+>", "").endsWith("IDAO"))
                 .findFirst().get()).getActualTypeArguments()[0]);
-        this.defaultDoClass = generateDoDefaultClass();
+        Class<?> defaultDoClass = generateDoDefaultClass();
         try {
 
-            this.defaultDoProxyObj = this.defaultDoClass.newInstance();
+            this.defaultDoProxyObj = defaultDoClass.newInstance();
 
             // 依赖注入
-            Field m = this.defaultDoClass.getDeclaredField("manager");
+            Field m = defaultDoClass.getDeclaredField("manager");
             m.setAccessible(true);
 
-            // this.manager 是 PluginClassLoader 加载的SqlManager类生成的对象
-            // defaultDoProxyObj 是由 javassist 的类加载器加载的类生成的对象，其中的 manager 字段的类型的SqlManager类是由这个类加载器加载的(javassist中的类加载器打破了父类委托机制，即使把 PluginClassLoader 设置成 javassist 的父加载器, 它也不会让 PluginClassLoader 去加载)
-            // 然后就不能把 this.manager 写入到 defaultDoProxyObj的 manager 字段里，因为它们的类不是同一个类加载器加载的，类型不同，蕨了，艹
-            // 解决方式：自己写了一个 ASMClassloader，给 javassist 的类加载器重建父类委托机制
             m.set(this.defaultDoProxyObj, this.manager);
 
-            Field t = this.defaultDoClass.getDeclaredField("table");
+            Field t = defaultDoClass.getDeclaredField("table");
             t.setAccessible(true);
             t.set(this.defaultDoProxyObj, this.table);
 
@@ -67,7 +60,6 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
     }
 
     // 使用 javassist 生成执行 Default 的类(继承代理的接口类)
-    @SuppressWarnings("unchecked")
     private Class<?> generateDoDefaultClass() {
         ClassPool classPool = ClassPool.getDefault();
 
@@ -76,10 +68,6 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
         String cn = this.clazz.getName() + "ImplClass";
         CtClass clazz = classPool.makeClass(cn);
         CtClass interf  = null;
-
-        //Loader loader = new Loader(this.getClass().getClassLoader(), classPool); 爬
-        // 使用自己的类加载器，重建父类委托机制
-        ASMClassLoader loader = new ASMClassLoader((PluginClassLoader) this.getClass().getClassLoader(), classPool);
 
         try {
             interf = classPool.getCtClass(this.clazz.getName());
@@ -105,14 +93,7 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
         Class<?> ret = null;
         try {
 
-            // 强行把生成的类塞到 PluginClassLoader 里
-            Field classesField = PluginClassLoader.class.getDeclaredField("classes");
-            classesField.setAccessible(true);
-            HashMap<String, Class<?>> classes = ((HashMap<String, Class<?>>) classesField.get(this.getClass().getClassLoader()));
-            classes.put(cn, loader.loadClass(cn));
-            classesField.set(this.getClass().getClassLoader(), classes);
-
-            ret = this.getClass().getClassLoader().loadClass(cn);
+            ret = clazz.toClass(this.getClass().getClassLoader());
 
         } catch (Exception e) {
             e.printStackTrace();
