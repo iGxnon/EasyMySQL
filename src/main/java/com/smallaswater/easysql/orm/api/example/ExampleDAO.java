@@ -1,9 +1,6 @@
 package com.smallaswater.easysql.orm.api.example;
 
-import com.smallaswater.easysql.orm.annotations.dao.DoDefault;
-import com.smallaswater.easysql.orm.annotations.dao.DoExecute;
-import com.smallaswater.easysql.orm.annotations.dao.DoInsert;
-import com.smallaswater.easysql.orm.annotations.dao.DoQuery;
+import com.smallaswater.easysql.orm.annotations.dao.*;
 import com.smallaswater.easysql.orm.api.IDAO;
 
 import java.util.List;
@@ -20,8 +17,11 @@ public interface ExampleDAO extends IDAO<ExampleEntity> {
     /**
      * ? 为参数的占位符，多少个参数就多少个 ?，? 在什么位置参数就会补充到什么位置
      */
-    @DoQuery("SELECT WHERE id > ? FROM {table}")
+    @DoQuery("SELECT * FROM {table} WHERE id > ?")
     List<ExampleEntity> queryEntitiesIDAfter(Long id);
+
+    @DoQueryRow("SELECT * FROM {table} WHERE id = ?")
+    ExampleEntity queryEntity(Long id);
 
     @DoExecute("DELETE FROM {table} WHERE id = ? AND uuid = ?")
     void deleteEntity(Long id, String uuid);

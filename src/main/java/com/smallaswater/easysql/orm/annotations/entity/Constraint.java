@@ -5,7 +5,6 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-// TODO
 
 /**
  * 表级定义约束(仅在创建数据表时有效)
@@ -31,22 +30,24 @@ public @interface Constraint {
 
     String name(); // 约束的名称
 
-    ConstraintType type(); // 约束类型
+    Type type(); // 约束类型
+
+    enum Type {
+
+        PRIMARY("primary"), // 希望有个联合主键可以用这个
+        UNIQUE("unique");   // 希望多个列联合唯一可以用这个
+
+        private final String sql;
+
+        Type(String sql) {
+            this.sql = sql;
+        }
+
+        @Override
+        public String toString() {
+            return this.sql;
+        }
+    }
 }
 
-enum ConstraintType {
 
-    PRIMARY("primary"), // 希望有个联合主键可以用这个
-    UNIQUE("unique");   // 希望多个列联合唯一可以用这个
-
-    private final String sql;
-
-    ConstraintType(String sql) {
-        this.sql = sql;
-    }
-
-    @Override
-    public String toString() {
-        return this.sql;
-    }
-}

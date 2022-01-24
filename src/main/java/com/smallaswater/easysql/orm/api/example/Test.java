@@ -19,10 +19,12 @@ public class Test {
 //                .buildORMDynaProxyIDAO(ExampleDAO.class));
 //        dao.doSomething();
 
-        ORMDynaProxyHandle<ExampleDAO> handle = new ORMDynaProxyHandle<>(ExampleDAO.class, "t_table", null);
+//        ORMDynaProxyHandle<ExampleDAO> handle = new ORMDynaProxyHandle<>(ExampleDAO.class, "t_table", null);
+//
+//        ExampleDAO idao = handle.getProxyInstance();
+//        idao.doSomething();
 
-        ExampleDAO idao = handle.getProxyInstance();
-        idao.doSomething();
+        System.out.println(Types.INT);
 
     }
 }

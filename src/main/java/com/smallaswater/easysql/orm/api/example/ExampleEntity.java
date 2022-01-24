@@ -9,13 +9,16 @@ public class ExampleEntity {
     @Column(name = "id", type = Types.ID) // ID 类型的 column 会自增
     public Long id;
 
+    @Constraint(name = "t_unique_uuids", type = Constraint.Type.UNIQUE)
     @AutoUUIDGenerate // 自动生成 uuid
     @Column(name = "uuid", type = Types.VARCHAR)
+    //@ForeignKey(tableName = "t_other", columnName = "uuid")  外键
     public String uuid;
 
-    @Column(name = "index", type = Types.INT)
+    @Column(name = "register_index", type = Types.INT, options = {Options.NULL}) // 注意name字段不要命名成关键字，如这里的 index
     public Long index;
 
+    @Constraint(name = "t_unique_uuids", type = Constraint.Type.UNIQUE)
     @AutoUUIDGenerate
     @Column(name = "second_uuid", type = Types.VARCHAR, options = {Options.NULL})  // 可以是 null
     public String secondUUID;

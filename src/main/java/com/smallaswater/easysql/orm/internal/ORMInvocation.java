@@ -4,17 +4,16 @@ import cn.nukkit.plugin.PluginClassLoader;
 import com.smallaswater.easysql.mysql.data.SqlData;
 import com.smallaswater.easysql.mysql.data.SqlDataList;
 import com.smallaswater.easysql.mysql.utils.ChunkSqlType;
-import com.smallaswater.easysql.orm.annotations.dao.DoDefault;
-import com.smallaswater.easysql.orm.annotations.dao.DoExecute;
-import com.smallaswater.easysql.orm.annotations.dao.DoInsert;
-import com.smallaswater.easysql.orm.annotations.dao.DoQuery;
+import com.smallaswater.easysql.orm.annotations.dao.*;
 import com.smallaswater.easysql.orm.annotations.entity.*;
 import com.smallaswater.easysql.orm.api.IDAO;
+import com.smallaswater.easysql.orm.utils.Options;
 import com.smallaswater.easysql.v3.mysql.manager.SqlManager;
 import javassist.*;
 
 import java.lang.reflect.*;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
 
@@ -167,25 +166,45 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
             return null; // Execute 不支持返回
         }else if (method.isAnnotationPresent(DoQuery.class)) {
             return handleQuery(method.getAnnotation(DoQuery.class).value(), args);
+        }else if (method.isAnnotationPresent(DoQueryRow.class)) {
+            return handleQueryRow(method.getAnnotation(DoQueryRow.class).value(), args);
         }
+        return null;
+    }
+
+    private Object handleQueryRow(String sql, Object[] args) {
+        sql = sql.replace("{table}", this.table);
+        if (checkParams(sql, args)) {
+            throw new RuntimeException("SQL语法错误，入参数量不匹配");
+        }
+        ArrayList<ChunkSqlType> chunks = getSqlChunks(args);
+        try {
+            Object obj = this.entityClass.newInstance();
+            SqlData data = this.manager.getData(sql, chunks.toArray(new ChunkSqlType[0])).get(0);
+            for (Map.Entry<String, Object> entry : data.getData().entrySet()) {
+                Object value = entry.getValue();
+                String columnName = entry.getKey();
+                Field columnFiled = findField(columnName);
+                if (columnFiled != null) {
+                    columnFiled.set(obj, value);
+                }
+            }
+            return obj;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         return null;
     }
 
 
     private List<Object> handleQuery(String sql, Object[] args) {
         sql = sql.replace("{table}", this.table);
-        if (args != null && !checkParams(sql, Objects.requireNonNull(args).length)) {
+        if (checkParams(sql, args)) {
             throw new RuntimeException("SQL语法错误，入参数量不匹配");
         }
-        ArrayList<ChunkSqlType> chunks = new ArrayList<>();
-        int i = 1;
-        String s = sql;
-        while (s.contains("?")) {
-            s = s.replace("?", "");
-            ChunkSqlType chunk = new ChunkSqlType(i, args[i - 1].toString());
-            chunks.add(chunk);
-            i ++;
-        }
+
+        ArrayList<ChunkSqlType> chunks = getSqlChunks(args);
 
         List<Object> ret = new ArrayList<>();
         SqlDataList<SqlData> queryData = this.manager.getData(sql, chunks.toArray(new ChunkSqlType[0]));
@@ -211,18 +230,148 @@ public class ORMInvocation<T extends IDAO<?>> implements InvocationHandler {
     }
 
 
-
     private void handleInsert(Object[] args) {
+        Object entity = args[0];
+        StringBuilder sb = new StringBuilder();
+        Map<String, List<String>> uniqueConstraints = new LinkedHashMap<>(); // 联合唯一键
+        AtomicReference<String> pkConstraintName = new AtomicReference<>(""); // 联合主键
+        List<String> pkConstraints = new ArrayList<>();
+        Map<String, String> foreignKeys = new LinkedHashMap<>(); // 外键
 
+        SqlData data = new SqlData();
+
+        Arrays.stream(this.entityClass.getDeclaredFields())
+                .filter(it -> it.isAnnotationPresent(Column.class))
+                .forEach(it -> {
+                    Column column = it.getAnnotation(Column.class);
+                    String option = getOption(column.type().toString(), column.options());
+
+                    if (it.isAnnotationPresent(Constraint.class)) {
+                        Constraint constraint = it.getAnnotation(Constraint.class);
+                        switch (constraint.type()) {
+                            case UNIQUE:
+                                uniqueConstraints.putIfAbsent(constraint.name(), new ArrayList<>());
+                                uniqueConstraints.get(constraint.name()).add(column.name());
+                                break;
+                            case PRIMARY:
+                                pkConstraintName.set(constraint.name());
+                                pkConstraints.add(column.name());
+                                break;
+                        }
+                    }
+
+                    if (it.isAnnotationPresent(ForeignKey.class)) {
+                        ForeignKey foreignKey = it.getAnnotation(ForeignKey.class);
+                        foreignKeys.put(column.name(), foreignKey.tableName()+"("+foreignKey.columnName()+")");
+                    }
+
+                    sb.append(column.name()).append(" ").append(option).append(",");
+
+
+                    try {
+                        Object value = it.get(entity);
+                        if (it.isAnnotationPresent(AutoUUIDGenerate.class)) {
+                            value = UUID.randomUUID().toString();
+                        }
+                        if (!option.contains("auto_increment") && value != null) { // 跳过自增键和空值
+                            data.put(column.name(), value);
+                        }
+
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                });
+        for (Map.Entry<String, List<String>> entry : uniqueConstraints.entrySet()) {
+            sb.append("constraint").append(" ").append(entry.getKey())
+                    .append(" ").append("unique").append("(")
+                    .append(Arrays.toString(entry.getValue().toArray(new String[0]))
+                            .replace("[", "").replace("]", ""))
+                    .append("),");
+        }
+
+        if (!pkConstraintName.get().equals("")) {
+            sb.append("constraint").append(" ").append(pkConstraintName.get())
+                    .append(" ").append("primary key").append("(")
+                    .append(Arrays.toString(pkConstraints.toArray(new String[0]))
+                            .replace("[", "").replace("]", ""))
+                    .append("),");
+        }
+
+        for (Map.Entry<String, String> entry : foreignKeys.entrySet()) {
+            sb.append("foreign key").append("(").append(entry.getKey()).append(")").append(" ")
+                    .append("references").append(" ").append(entry.getValue()).append(",");
+        }
+
+        String createSQL = "create table if not exists "+this.table+"("+sb.substring(0, sb.length()-1)+")ENGINE=InnoDB DEFAULT CHARSET=utf8;";
+        this.manager.executeSql(createSQL);
+
+        this.manager.insertData(this.table, data);
     }
 
     private void handleExecute(String sql, Object[] args) {
+        sql = sql.replace("{table}", this.table);
+        if (checkParams(sql, args)) {
+            throw new RuntimeException("SQL语法错误，入参数量不匹配");
+        }
 
+        ArrayList<ChunkSqlType> chunks = getSqlChunks(args);
+
+        this.manager.executeSql(sql, chunks.toArray(new ChunkSqlType[0]));
     }
 
 
-    private boolean checkParams(String sql, int cnt) {
-         return cnt == sql.split("\\?").length - 1;
+    private boolean checkParams(String sql, Object[] args) {
+        if (args == null) {
+            return sql.contains("?");
+        }
+        int cnt = 0;
+        while (sql.contains("?")) {
+            sql = sql.replaceFirst("\\?", "");
+            cnt ++;
+        }
+        return args.length != cnt;
+    }
+
+    private ArrayList<ChunkSqlType> getSqlChunks(Object[] args) {
+        if (args == null){
+            return new ArrayList<>();
+        }
+        ArrayList<ChunkSqlType> chunks = new ArrayList<>();
+        for (int i = 1; i <= args.length; i++) {
+            ChunkSqlType chunk = new ChunkSqlType(i, args[i - 1].toString());
+            chunks.add(chunk);
+        }
+        return chunks;
+    }
+
+    private String getOption(String option, Options[] options) {
+        StringBuilder optionBuilder = new StringBuilder(option);
+        for (Options op : options) {
+            switch (op) {
+                case PRIMARY_KEY:
+                    if (!optionBuilder.toString().contains("primary key")) {
+                        optionBuilder.append(" primary key");
+                    }
+                case UNIQUE:
+                    if (!optionBuilder.toString().contains("unique")) {
+                        optionBuilder.append(" unique");
+                    }
+                case NULL:
+                    optionBuilder = new StringBuilder(optionBuilder.toString().replace("not null", "null")); // 覆盖 Types 里的选项
+                    if (!optionBuilder.toString().contains("null")) {
+                        optionBuilder.append(" null");
+                    }
+                    break;
+                case NOT_NULL:
+                    optionBuilder = new StringBuilder(optionBuilder.toString().replace("null", "not null"));
+                    if (!optionBuilder.toString().contains("not null")) {
+                        optionBuilder.append(" not null");
+                    }
+                    break;
+            }
+        }
+        option = optionBuilder.toString();
+        return option;
     }
 
 }
